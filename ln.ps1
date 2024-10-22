@@ -1,7 +1,18 @@
 Set-StrictMode -Off;
 
 # bodge the ln command
-$usage = "usage: ln [-s] <target> [link_name]"
+$usage = @"
+Usage: ln [OPTION]... TARGET LINK_NAME
+  or:  ln [OPTION]... TARGET
+In the 1st form, create a link to TARGET with the name LINK_NAME.
+In the 2nd form, create a link to TARGET in the current directory.
+Create hard links by default, symbolic links with --symbolic.
+By default, each destination (name of new link) should not already exist.
+
+  -f, --force                 remove existing destination files
+  -s, --symbolic              make symbolic links instead of hard links
+      --help                  display this help and exit
+"@
 
 $src = '
 using System;
@@ -43,14 +54,33 @@ function hardlink($target, $link_name) {
 }
 
 $symbolic = $false
-$target = $args[0]
-$link_name = $args[1]
+$force = $false
+$target = $null
+$link_name = $null
 $is_dir = $false
 
-if($target -like '-s') {
-	$symbolic = $true
-	$target = $args[1]
-	$link_name = $args[2]
+foreach ($arg in $args) {
+    if ($arg -like '-s*') {
+        $symbolic = $true
+        if ($arg -like '*f*') {
+            $force = $true
+        }
+    } elseif ($arg -like '-f*') {
+        $force = $true
+        if ($arg -like '*s*') {
+            $symbolic = $true
+        }
+    } elseif ($arg -like '--symbolic') {
+        $symbolic = $true
+    } elseif ($arg -like '--force') {
+        $force = $true
+    } elseif ($arg -like '--help') {
+        $usage; exit 0
+    } elseif (-not $target) {
+        $target = $arg
+    } elseif (-not $link_name) {
+        $link_name = $arg
+    }
 }
 
 if(!$target) { "ln: target is required"; $usage; exit 1 }
@@ -62,11 +92,15 @@ if(!$link_name) {
 }
 
 if(!(test-path $target)) {
-	"ln: $target`: No such file or directory"; exit 1
+	"ln: failed to access '$target': No such file or directory"; exit 1
 }
 
 if(test-path $link_name) {
-	"ln: $link_name`: File exists"
+    if ($force) {
+        Remove-Item -Force $link_name
+    } else {
+        "ln: failed to create link '$link_name': File exists"; exit 1
+    }
 }
 
 $abstarget = "$(resolve-path $target)"
@@ -79,7 +113,7 @@ if($abstarget -eq $link_name) {
 }
 
 if(!$symbolic -and $is_dir) {
-	"ln: Can't create hard links for directories: use -s for symbolic link"; $usage; exit 1
+	"ln: $target`: hard link not allowed for directory"; exit 1
 }
 
 if(!(isadmin)) {
